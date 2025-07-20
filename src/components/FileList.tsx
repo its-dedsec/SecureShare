@@ -7,9 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { FileMetadata } from '@/utils/encryption';
-import { getAllFileMetadata, getEncryptedFile, deleteEncryptedFile } from '@/utils/storage';
 import { decryptFile } from '@/utils/encryption';
+import { FileRecord, getUserFiles, getEncryptedFileFromDB, deleteEncryptedFileFromDB } from '@/utils/supabaseStorage';
+import FileShare from './FileShare';
 import { toast } from '@/hooks/use-toast';
 
 interface FileListProps {
@@ -17,9 +17,10 @@ interface FileListProps {
 }
 
 const FileList = ({ refreshTrigger }: FileListProps) => {
-  const [files, setFiles] = useState<FileMetadata[]>([]);
+  const [files, setFiles] = useState<FileRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadPassword, setDownloadPassword] = useState('');
+  const [sharePassword, setSharePassword] = useState('');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -29,8 +30,8 @@ const FileList = ({ refreshTrigger }: FileListProps) => {
 
   const loadFiles = async () => {
     try {
-      const fileList = await getAllFileMetadata();
-      setFiles(fileList.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()));
+      const fileList = await getUserFiles();
+      setFiles(fileList);
     } catch (error) {
       console.error('Failed to load files:', error);
       toast({
@@ -58,7 +59,7 @@ const FileList = ({ refreshTrigger }: FileListProps) => {
     try {
       console.log('Starting secure download process...');
       
-      const encryptedFile = await getEncryptedFile(fileId);
+      const encryptedFile = await getEncryptedFileFromDB(fileId);
       if (!encryptedFile) {
         throw new Error('File not found');
       }
@@ -101,7 +102,7 @@ const FileList = ({ refreshTrigger }: FileListProps) => {
     }
 
     try {
-      await deleteEncryptedFile(fileId);
+      await deleteEncryptedFileFromDB(fileId);
       toast({
         title: "File Deleted",
         description: `${filename} has been permanently deleted`,
@@ -133,6 +134,10 @@ const FileList = ({ refreshTrigger }: FileListProps) => {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const handleShareComplete = () => {
+    loadFiles(); // Refresh the file list
   };
 
   if (loading) {
@@ -169,12 +174,15 @@ const FileList = ({ refreshTrigger }: FileListProps) => {
                 <div className="min-w-0 flex-1">
                   <h3 className="font-medium text-white truncate">{file.filename}</h3>
                   <div className="flex items-center gap-4 text-sm text-gray-400">
-                    <span>{formatFileSize(file.size)}</span>
-                    <span>{formatDate(file.uploadDate)}</span>
+                    <span>{formatFileSize(file.file_size)}</span>
+                    <span>{formatDate(file.created_at)}</span>
                     <div className="flex items-center gap-1">
                       <Lock className="h-3 w-3" />
                       <span>AES-256 Encrypted</span>
                     </div>
+                    {file.access_type === 'shared' && (
+                      <span className="text-green-400 text-xs">Shared with you</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -230,14 +238,24 @@ const FileList = ({ refreshTrigger }: FileListProps) => {
                   </DialogContent>
                 </Dialog>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="border-red-600 text-red-400 hover:bg-red-600 hover:text-white"
-                  onClick={() => handleDelete(file.id, file.filename)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {file.access_type === 'owner' && (
+                  <FileShare 
+                    fileId={file.id} 
+                    filename={file.filename}
+                    onShareComplete={handleShareComplete}
+                  />
+                )}
+
+                {file.access_type === 'owner' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-red-600 text-red-400 hover:bg-red-600 hover:text-white"
+                    onClick={() => handleDelete(file.id, file.filename)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
           ))}

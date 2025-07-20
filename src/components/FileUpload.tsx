@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { encryptFile } from '@/utils/encryption';
-import { storeEncryptedFile } from '@/utils/storage';
+import { storeEncryptedFileInDB } from '@/utils/supabaseStorage';
 import { toast } from '@/hooks/use-toast';
 
 interface FileUploadProps {
@@ -73,7 +73,7 @@ const FileUpload = ({ onUploadComplete }: FileUploadProps) => {
       const encryptedFile = await encryptFile(selectedFile, password);
       setUploadProgress(75);
       
-      const fileId = await storeEncryptedFile(encryptedFile);
+      const fileId = await storeEncryptedFileInDB(encryptedFile);
       setUploadProgress(100);
       
       toast({

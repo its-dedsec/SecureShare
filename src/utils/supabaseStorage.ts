@@ -75,35 +75,59 @@ export async function getUserFiles(): Promise<FileRecord[]> {
   }));
 }
 
-// Get encrypted file data by ID
+// Get encrypted file data by ID (works for both owned and shared files)
 export async function getEncryptedFileFromDB(fileId: string): Promise<EncryptedFile | null> {
-  const { data, error } = await supabase
-    .from('encrypted_files')
+  // First try to get from accessible_files view (handles both owned and shared files)
+  const { data: accessibleFile, error: accessError } = await supabase
+    .from('accessible_files')
     .select('*')
     .eq('id', fileId)
     .single();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // File not found
+  if (accessError) {
+    if (accessError.code === 'PGRST116') {
+      return null; // File not found or no access
     }
-    console.error('Error fetching file:', error);
+    console.error('Error fetching file:', accessError);
     throw new Error('Failed to fetch encrypted file');
   }
 
-  // Convert base64 strings back to ArrayBuffer and Uint8Arrays
-  const encryptedData = Uint8Array.from(atob(data.encrypted_data), c => c.charCodeAt(0)).buffer;
-  const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
-  const salt = Uint8Array.from(atob(data.salt), c => c.charCodeAt(0));
+  // If we don't have the encrypted data in the view, we need to get it from the main table
+  // This happens for shared files where the view doesn't include the actual encrypted data
+  let encryptedData, iv, salt;
+  
+  if (accessibleFile.encrypted_data) {
+    // We have direct access (owned file)
+    encryptedData = Uint8Array.from(atob(accessibleFile.encrypted_data), c => c.charCodeAt(0)).buffer;
+    iv = Uint8Array.from(atob(accessibleFile.iv), c => c.charCodeAt(0));
+    salt = Uint8Array.from(atob(accessibleFile.salt), c => c.charCodeAt(0));
+  } else {
+    // This is a shared file, get the encrypted data from the main table
+    // We can access this because the file_shares table validates our access
+    const { data: fileData, error: fileError } = await supabase
+      .from('encrypted_files')
+      .select('encrypted_data, iv, salt')
+      .eq('id', fileId)
+      .single();
+
+    if (fileError) {
+      console.error('Error fetching encrypted file data:', fileError);
+      throw new Error('Failed to fetch encrypted file data');
+    }
+
+    encryptedData = Uint8Array.from(atob(fileData.encrypted_data), c => c.charCodeAt(0)).buffer;
+    iv = Uint8Array.from(atob(fileData.iv), c => c.charCodeAt(0));
+    salt = Uint8Array.from(atob(fileData.salt), c => c.charCodeAt(0));
+  }
 
   return {
-    filename: data.filename,
-    originalSize: data.file_size,
+    filename: accessibleFile.filename,
+    originalSize: accessibleFile.file_size,
     encryptedData,
     iv,
     salt,
     authTag: new Uint8Array(16), // Placeholder, will be extracted during decryption
-    timestamp: new Date(data.created_at).getTime(),
+    timestamp: new Date(accessibleFile.created_at).getTime(),
     checksum: '' // Not stored separately in this implementation
   };
 }
